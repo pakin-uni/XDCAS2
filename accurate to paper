@@ -1,0 +1,17 @@
+class C2f_EMA(C2f):
+    """
+    C2f with EMA inserted by replacing one of the internal residual blocks.
+    By default, replace the SECOND block (index=1) to match the “second residual block” wording.
+    If n == 1, it will replace the first (and only) block.
+    """
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, groups=4, replace_idx=1):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        # Pick which internal block to replace
+        if len(self.m) == 0:
+            # no internal blocks; nothing to replace
+            self.ema_idx = None
+        else:
+            self.ema_idx = min(replace_idx, len(self.m) - 1)
+            self.m[self.ema_idx] = EMA(self.c, groups=groups)
+
+    # forward() stays identical to C2f so the topology is preserved
