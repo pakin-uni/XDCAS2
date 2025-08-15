@@ -1,17 +1,22 @@
-class C2f_EMA(C2f):
-    """
-    C2f with EMA inserted by replacing one of the internal residual blocks.
-    By default, replace the SECOND block (index=1) to match the “second residual block” wording.
-    If n == 1, it will replace the first (and only) block.
-    """
-    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, groups=4, replace_idx=1):
-        super().__init__(c1, c2, n, shortcut, g, e)
-        # Pick which internal block to replace
-        if len(self.m) == 0:
-            # no internal blocks; nothing to replace
-            self.ema_idx = None
-        else:
-            self.ema_idx = min(replace_idx, len(self.m) - 1)
-            self.m[self.ema_idx] = EMA(self.c, groups=groups)
+class C2fEMA(nn.Module):
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
+        super().__init__()
+        self.c = int(c2 * e)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)  # Initial Conv
+        self.ema = EMA(self.c)                # EMA after split
+        self.m = nn.ModuleList(
+            Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0)
+            for _ in range(n)
+        )
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)  # Final Conv
+    def forward(self, x):
+        y = list(self.cv1(x).chunk(2, 1))  # Split into [y0, y1]
+        y[1] = self.ema(y[1])              # Apply EMA to second part only
+        y.extend(m(y[-1]) for m in self.m) # Bottlenecks process updated y[1]
+        return self.cv2(torch.cat(y, 1))
 
-    # forward() stays identical to C2f so the topology is preserved
+    def forward_split(self, x):
+        y = list(self.cv1(x).split((self.c, self.c), 1))
+        y[1] = self.ema(y[1])              # Apply EMA to second part
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
